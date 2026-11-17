@@ -189,7 +189,10 @@ def forecast(case, p1):
     for h in range(2, 25):
         sp = sorted(samples[h])
         if not sp:
-            out[h] = [p1] * 5
+            # No comparable informs this hour: use the baseline shape.
+            s = 0.15 * math.sqrt(max(h - 1, 0))
+            out[h] = [min(1e9, max(1.0, math.floor(
+                p1 * math.exp(z * s) * 100 + 0.5) / 100.0)) for z in Z]
             continue
         qs = [wquantile(sp, t) for t in TAUS]
         med = qs[2]
