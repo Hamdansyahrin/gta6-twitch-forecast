@@ -203,3 +203,117 @@ def forecast(case, p1):
             row.append(min(1e9, max(1.0, math.floor(v * 100 + 0.5) / 100.0)))
         out[h] = row
     return out
+
+
+def round_js(x):
+    """Round half up to two decimals, as the house starter does."""
+    return math.floor(x * 100 + 0.5) / 100.0
+
+
+def hour_one_print(case):
+    """The known hour-1 viewer count, with fallbacks so we never crash."""
+    for row in case.get("known") or []:
+        try:
+            if int(row.get("hour", 1)) == 1:
+                v = float(row["viewers"])
+                if v > 0:
+                    return v
+        except Exception:
+            continue
+    for row in case.get("known") or []:
+        try:
+            v = float(row["viewers"])
+            if v > 0:
+                return v
+        except Exception:
+            continue
+    for key in ("history_hourly", "history"):
+        rows = case.get(key) or []
+        if rows:
+            try:
+                v = float(rows[-1]["viewers"])
+                if v > 0:
+                    return v
+            except Exception:
+                pass
+    return 1.0
+
+
+def baseline(p1, hours):
+    """The house baseline, kept as the fallback: flat median at the hour-1
+    print, lognormal spread 0.15 * sqrt(h - 1)."""
+    out = {}
+    for h in hours:
+        s = 0.15 * math.sqrt(max(h - 1, 0))
+        out[h] = [min(1e9, max(1.0, round_js(p1 * math.exp(z * s)))) for z in Z]
+    return out
+
+
+def num(x):
+    r = round_js(float(x))
+    if r == int(r):
+        return str(int(r))
+    return repr(r)
+
+
+def json_out(hours_map, hours):
+    parts = []
+    for h in hours:
+        row = hours_map[h]
+        parts.append('{"hour":%d,"q":[%s]}' % (h, ",".join(num(v) for v in row)))
+    return '{"hours":[' + ",".join(parts) + "]}"
+
+
+def run_case(case):
+    """Forecast one case; degrade to the baseline, then to flat, on error."""
+    p1 = hour_one_print(case)
+    hours = []
+    for row in case.get("forecast") or []:
+        try:
+            hours.append(int(row["hour"]))
+        except Exception:
+            continue
+    hours = sorted(set(hours)) or list(range(2, 25))
+    try:
+        fc = forecast(case, p1)
+        picked = {}
+        for h in hours:
+            src = min(24, max(2, h))
+            picked[h] = fc[src]
+        return json_out(picked, hours)
+    except Exception:
+        pass
+    try:
+        return json_out(baseline(p1, hours), hours)
+    except Exception:
+        flat = {h: [p1] * 5 for h in hours}
+        return json_out(flat, hours)
+
+
+def main():
+    in_dir = os.environ.get("MAKEFUN_INPUT_DIR", "/input")
+    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
+    os.makedirs(out_dir, exist_ok=True)
+    try:
+        names = sorted(n for n in os.listdir(in_dir) if n.endswith(".in"))
+    except Exception:
+        names = []
+    for name in names:
+        path = os.path.join(in_dir, name)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                case = json.load(fh)
+        except Exception:
+            continue
+        cid = case.get("id") or name[:-3]
+        try:
+            text = run_case(case)
+        except Exception:
+            text = '{"hours":[]}'
+        with open(os.path.join(out_dir, cid + ".out"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(text)
+
+
+if __name__ == "__main__":
+    main()
